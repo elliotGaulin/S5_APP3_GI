@@ -4,16 +4,15 @@ import matplotlib.pyplot as plt
 import datetime
 
 guit_sample_rate, guit_signal = sp.io.wavfile.read('note_guitare_lad.wav')
-guit_signal = guit_signal * np.hamming(len(guit_signal))
 basson_sample_rate, basson_signal = sp.io.wavfile.read('note_basson_plus_sinus_1000_hz.wav')
-basson_signal = basson_signal * np.hamming(len(basson_signal))
 
 def amplitude_db(signal, eps=1e-12):
     return 20 * np.log10(np.maximum(np.abs(signal), eps))
 
 def guitare():
-    spectre = np.fft.fft(guit_signal)
-    freqs = np.fft.fftfreq(len(guit_signal), 1 / guit_sample_rate)
+    guit_fenetre = guit_signal * np.hanning(len(guit_signal))
+    spectre = np.fft.fft(guit_fenetre)
+    freqs = np.fft.fftfreq(len(guit_fenetre), 1 / guit_sample_rate)
     plt.figure()
     plt.plot(freqs, amplitude_db(spectre), label='Spectre')
     plt.title('Spectre de la guitare (dB)')
@@ -31,8 +30,15 @@ def enveloppe(signal, plot = False):
     
     if plot:
         plt.figure()
-        plt.plot(signal_abs, label='|Signal|')
-        plt.plot(enveloppe, 'r', label='Enveloppe')
+        plt.title('Filtre passe-bas pour l\'enveloppe')
+        plt.plot(amplitude_db(low_pass_filter), label='Filtre passe-bas')
+        plt.xlabel('Échantillons')
+        plt.ylabel('Amplitude (dB)')
+        plt.legend()
+        
+        plt.figure()
+        # plt.plot(signal_abs, label='|Signal|')
+        plt.plot(enveloppe, label='Enveloppe')
         plt.title('Enveloppe temporelle')
         plt.xlabel('Échantillons')
         plt.ylabel('Amplitude')
@@ -70,8 +76,9 @@ def filter_calcs(plot=False):
     return N[best_N]
 
 def harmoniques_top32(signal, sample_rate, distance=400, plot=False):
-    spectre = np.fft.rfft(signal)
-    freqs = np.fft.rfftfreq(len(signal), 1 / sample_rate)
+    signal_fenetre = signal * np.hanning(len(signal))
+    spectre = np.fft.rfft(signal_fenetre)
+    freqs = np.fft.rfftfreq(len(signal_fenetre), 1 / sample_rate)
     freq_res = freqs[1] - freqs[0]
     amp = np.abs(spectre)
     phase = np.angle(spectre)
@@ -101,7 +108,7 @@ def harmoniques_top32(signal, sample_rate, distance=400, plot=False):
     
     if plot:
         plt.figure()
-        plt.plot(freqs, amplitude_db(amp), label='Spectre (dB)')
+        plt.plot(freqs, amplitude_db(np.abs(spectre)), label='Spectre (dB)')
         plt.scatter(freqs[top_idx], amplitude_db(amp[top_idx]), color='r', label='Harmoniques')
         plt.title('Spectre et harmoniques (dB)')
         plt.xlabel('Fréquence (Hz)')
@@ -112,7 +119,7 @@ def harmoniques_top32(signal, sample_rate, distance=400, plot=False):
     return harmoniques
     
 def synthese(harmoniques,sample_rate=guit_sample_rate, plot=False, signal_enveloppe=guit_signal):
-    enveloppe_signal = enveloppe(signal_enveloppe)
+    enveloppe_signal = enveloppe(signal_enveloppe, plot=plot)
     duration = len(enveloppe_signal) / sample_rate
     t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
     signal = np.zeros_like(t)
@@ -121,18 +128,18 @@ def synthese(harmoniques,sample_rate=guit_sample_rate, plot=False, signal_envelo
         signal += amp * np.sin(2 * np.pi * freq * t + phase)
     
     signal_enveloppe =  enveloppe_signal * signal
-    signal_enveloppe_normalise = signal_enveloppe / (np.max(np.abs(signal_enveloppe)) > 0 and np.max(np.abs(signal_enveloppe)) or 1)
+    signal_enveloppe_normalise = normalise(signal_enveloppe)
     if plot:
         plt.figure()
-        plt.subplot(2, 1, 1)
+        plt.subplot(2, 1, 2)
         plt.title('Signal synthétisé')
         plt.plot(t, signal_enveloppe, 'r', label='Signal synthétisé')
         plt.xlabel('Temps (s)')
         plt.ylabel('Amplitude')
         plt.legend()
-        plt.subplot(2, 1, 2)
+        plt.subplot(2, 1, 1)
         plt.plot(t[:len(signal_enveloppe)], signal_enveloppe, 'b', label='Signal original')
-        plt.xlabel('Temps (s)')
+        # plt.xlabel('Temps (s)')
         plt.ylabel('Amplitude')
         plt.title('Signal original')
         plt.legend()
@@ -169,8 +176,7 @@ def synth_5ft_symphonie_bethoven():
     
     signals =[signal_sol, signal_sol, signal_sol, signal_red, signal_silence,
                              signal_fa, signal_fa, signal_fa, signal_re]
-    # signals = [signal_lad, signal_lad,signal_lad, signal_lad]
-        
+           
     nb_of_samples = .5 * guit_sample_rate
     
     synth_signal = np.concatenate([np.concatenate([s[:int(nb_of_samples)] for s in signals])])
@@ -182,6 +188,7 @@ def coupe_bande(sample_rate, ordre=6000, f_min=960, f_max=1040, plot=False):
     n = np.arange(-N//2, N//2 + 1) # Indices centrés sur 0
     
     K = 2 * N * ((f_max - f_min) / 2) / sample_rate + 1
+    print(f"K : {K}")
     n[N//2] = 1  # Éviter la division par zéro à n=0
     h_pb  = (1/N) * (np.sin(np.pi * n * K / N) / np.sin(np.pi * n / N))
     h_pb[N//2] = K/N
@@ -200,11 +207,37 @@ def coupe_bande(sample_rate, ordre=6000, f_min=960, f_max=1040, plot=False):
          
         freqs = np.fft.fftfreq(N, 1 / sample_rate)
         plt.figure()
-        plt.title('Réponse en fréquence du coupe-bande et du passe-bas')
-        plt.plot(freqs[:N//2], H_cp_db[:N//2], label='Coupe-bande')
-        plt.plot(freqs[:N//2], H_pb_db[:N//2], 'r', label='Passe-bas')
+        plt.subplot(2, 1, 1)
+        plt.title('Réponse en fréquence du coupe-bande')
+        plt.plot(freqs[:N//4], H_cp_db[:N//4], label='Coupe-bande')
         plt.xlabel('Fréquence (Hz)')
         plt.ylabel('Amplitude (dB)')
+        plt.xlim(0, 2000)
+        plt.ylim(-60, 5)
+        plt.legend()
+        plt.grid()
+        plt.subplot(2, 1, 2)
+        plt.title('Phase du coupe-bande')
+        plt.plot(freqs[:N//4], np.angle(H_cp[:N//4]), label='Coupe-bande')
+        plt.xlabel('Fréquence (Hz)')
+        plt.ylabel('Phase (radians)')
+        plt.yticks([-np.pi, -np.pi/2, 0, np.pi/2, np.pi], ['-π', '-π/2', '0', 'π/2', 'π'])
+        plt.xlim(0, 2000)
+
+        plt.figure()
+        plt.title('Réponse temporelle du coupe-bande')
+        plt.plot(n, h_cb, label='Coupe-bande')
+        plt.xlabel('Échantillons')
+        plt.ylabel('Amplitude')
+        plt.legend()
+        plt.grid()
+        
+        plt.figure()
+        plt.title('Réponse temporelle du coupe-bande à 1000 Hz')
+        plt.plot(n, np.cos(2 * np.pi * n * 1000 / sample_rate), label='Sinusoide à 1000 Hz')
+        plt.plot(n, np.convolve(h_cb, np.cos(2 * np.pi * n * 1000 / sample_rate))[:len(n)], label='Coupe-bande à 1000 Hz')
+        plt.xlabel('Échantillons')
+        plt.ylabel('Amplitude')
         plt.legend()
         plt.grid()
 
@@ -215,10 +248,10 @@ def filtre_basson(plot=False):
     signal_filtre = np.convolve(basson_signal, filtre)     
 
     if plot:
-        spectre = np.fft.rfft(basson_signal)
+        spectre = np.fft.rfft(basson_signal * np.hanning(len(basson_signal)))
         freqs = np.fft.rfftfreq(len(basson_signal), 1 / basson_sample_rate)
         
-        spectre_filtre = np.fft.rfft(signal_filtre)
+        spectre_filtre = np.fft.rfft(signal_filtre * np.hanning(len(signal_filtre)))
         freqs_filtre = np.fft.rfftfreq(len(signal_filtre), 1 / basson_sample_rate)
     
         plt.figure()
@@ -230,16 +263,19 @@ def filtre_basson(plot=False):
         plt.grid()
         plt.legend()
         
-    return signal_filtre / np.max(np.abs(signal_filtre))
+    return signal_filtre
+
+def normalise(signal):
+    return signal / (np.max(np.abs(signal)) > 0 and np.max(np.abs(signal)) or 1)
 
 def plot_basson_filtre_vs_synthese():    
     basson_filtre = filtre_basson(plot=True)    
     harmoniques_bass = harmoniques_top32(basson_filtre, basson_sample_rate, distance=200, plot=True)
     synth_basson = synthese(harmoniques_bass, basson_sample_rate, signal_enveloppe=basson_filtre, plot=True)    
 
-    spectre_filtre = np.fft.fft(basson_filtre)
+    spectre_filtre = np.fft.fft(basson_filtre * np.hanning(len(basson_filtre)))
     freqs_filtre = np.fft.fftfreq(len(basson_filtre), 1 / basson_sample_rate)
-    spectre_synth_basson = np.fft.fft(synth_basson)
+    spectre_synth_basson = np.fft.fft(synth_basson * np.hanning(len(synth_basson)))
     freqs_synth_basson = np.fft.fftfreq(len(synth_basson), 1 / basson_sample_rate)
     plt.figure()
     plt.subplot(2, 1, 1)
@@ -257,17 +293,18 @@ def plot_basson_filtre_vs_synthese():
     plt.grid()
 
 if __name__ == "__main__":
+    plot = True
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    signal_to_wav(synthese(harmoniques_top32(guit_signal, guit_sample_rate, plot=True), guit_sample_rate, plot=True), filename=f"synthese/synthese_guitare_lad_{now}.wav")
+    signal_to_wav(synthese(harmoniques_top32(guit_signal, guit_sample_rate, plot=plot), guit_sample_rate, plot=plot), filename=f"synthese/synthese_guitare_lad_{now}.wav")
     signal_to_wav(synth_5ft_symphonie_bethoven(), filename=f"synthese/symphonie_bethoven_{now}.wav")
 
     # Filtrage du basson
-    signal_to_wav(filtre_basson(), filename=f"synthese/basson_filtre_{now}.wav")
+    signal_to_wav(normalise(filtre_basson(plot=False)), filename=f"synthese/basson_filtre_{now}.wav")
     
     # Synthèse du basson
-    basson_filtre = filtre_basson(plot=True)    
-    harmoniques_bass = harmoniques_top32(basson_filtre, basson_sample_rate, distance=200, plot=True)
-    synth_basson = synthese(harmoniques_bass, basson_sample_rate, signal_enveloppe=basson_filtre, plot=True)    
+    basson_filtre = filtre_basson(plot=plot)    
+    harmoniques_bass = harmoniques_top32(basson_filtre, basson_sample_rate, distance=200, plot=plot)
+    synth_basson = synthese(harmoniques_bass, basson_sample_rate, signal_enveloppe=basson_filtre, plot=plot)    
     signal_to_wav(synth_basson, basson_sample_rate, filename=f"synthese/synthese_basson_lad_{now}.wav")
     
     
