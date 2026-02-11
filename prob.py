@@ -23,19 +23,12 @@ def guitare():
     plt.show()
     
 def enveloppe(signal, plot = False):
-    filter_order = np.int32(filter_calcs())
+    filter_order = np.int32(filter_calcs(plot=plot))
     signal_abs = np.abs(signal)
     low_pass_filter = np.ones(filter_order) / (filter_order)
     enveloppe = np.convolve(signal_abs, low_pass_filter)
     
-    if plot:
-        plt.figure()
-        plt.title('Filtre passe-bas pour l\'enveloppe')
-        plt.plot(amplitude_db(low_pass_filter), label='Filtre passe-bas')
-        plt.xlabel('Échantillons')
-        plt.ylabel('Amplitude (dB)')
-        plt.legend()
-        
+    if plot:  
         plt.figure()
         # plt.plot(signal_abs, label='|Signal|')
         plt.plot(enveloppe, label='Enveloppe')
@@ -59,17 +52,15 @@ def filter_calcs(plot=False):
         if abs(np.abs(H_w[i]) - 0.708) < abs((np.abs(H_w[best_N])) - 0.708):
             best_N = i
     
-    # print(f"N optimal pour H(pi/1000) = -3db : {N[best_N]} avec H(pi/1000) = {np.abs(H_w[best_N])}")
-    
-    # print(f"N - 1 : {N[best_N] - 1} avec H(pi/1000) = {np.abs(H_w[best_N - 1])}")
-    # print(f"N + 1 : {N[best_N] + 1} avec H(pi/1000) = {np.abs(H_w[best_N + 1])}")
-    
-    if plot:
+    if plot:       
+        w = np.linspace(0, np.pi/100, 1000)
+        w[0] = 1e-12  # éviter la division par zéro à w=0
+        H_w = 1/N[best_N] * (1 - np.exp(-1j * w * N[best_N]))/(1 - np.exp(-1j * w))
         plt.figure()
-        plt.scatter(N, np.abs(H_w), label='|H(w)|')
-        plt.title('Réponse du filtre en fonction de N')
-        plt.xlabel('N')
-        plt.ylabel('Amplitude')
+        plt.plot(w, amplitude_db(H_w), label=f'|H(w)| pour N = {N[best_N]:.0f}')
+        plt.title('Réponse en fréquence du filtre')
+        plt.xlabel('Fréquence (rad/s)')
+        plt.ylabel('Amplitude (dB)')
         plt.legend()
         plt.grid()
 
@@ -98,10 +89,10 @@ def harmoniques_top32(signal, sample_rate, distance=400, plot=False):
     max_amp = np.max(amp)
     max_amp_idx = np.argmax(amp)
     
-    print('Harmoniques (Hz, amplitude):')
+    print('Harmoniques (Hz, amplitude (dB), phase):')
     i = 1
     for idx in top_idx:
-        print(f'#{i} | {freqs[idx]:9.2f} Hz  |  {amp[idx]:.6g}')
+        print(f'{i} | {freqs[idx]:9.2f} |  {amplitude_db(amp[idx]):.6g} | {phase[idx]:.2f}')
         i += 1      
     
     harmoniques = [(freqs[idx], amp[idx], phase[idx]) for idx in top_idx]
@@ -137,6 +128,7 @@ def synthese(harmoniques,sample_rate=guit_sample_rate, plot=False, signal_envelo
         plt.xlabel('Temps (s)')
         plt.ylabel('Amplitude')
         plt.legend()
+        plt.grid()
         plt.subplot(2, 1, 1)
         plt.plot(t[:len(signal_enveloppe)], signal_enveloppe, 'b', label='Signal original')
         # plt.xlabel('Temps (s)')
@@ -144,6 +136,7 @@ def synthese(harmoniques,sample_rate=guit_sample_rate, plot=False, signal_envelo
         plt.title('Signal original')
         plt.legend()
         plt.grid()
+        
     return signal_enveloppe_normalise
 
 def signal_to_wav(signal, sample_rate=guit_sample_rate, filename='synthese.wav'):
@@ -158,7 +151,7 @@ def transpose(harmoniques, freq_cible=440):
         harmoniques_transposees.append((freq_transposee, amp, phase))
     return harmoniques_transposees
 
-def synth_5ft_symphonie_bethoven():
+def synth_5ft_symphonie_beethoven():
     harmoniques_lad = harmoniques_top32(guit_signal, guit_sample_rate)
 
     harmoniques_sol = transpose(harmoniques_lad, freq_cible=392)
@@ -234,7 +227,6 @@ def coupe_bande(sample_rate, ordre=6000, f_min=960, f_max=1040, plot=False):
         
         plt.figure()
         plt.title('Réponse temporelle du coupe-bande à 1000 Hz')
-        plt.plot(n, np.cos(2 * np.pi * n * 1000 / sample_rate), label='Sinusoide à 1000 Hz')
         plt.plot(n, np.convolve(h_cb, np.cos(2 * np.pi * n * 1000 / sample_rate))[:len(n)], label='Coupe-bande à 1000 Hz')
         plt.xlabel('Échantillons')
         plt.ylabel('Amplitude')
@@ -255,9 +247,16 @@ def filtre_basson(plot=False):
         freqs_filtre = np.fft.rfftfreq(len(signal_filtre), 1 / basson_sample_rate)
     
         plt.figure()
-        plt.title('Spectres du signal original et du signal filtré')
+        plt.subplot(2, 1, 1)
         plt.plot(freqs, amplitude_db(np.abs(spectre)), label='Signal original (dB)')
+        plt.title('Spectres du signal original')
+        plt.xlabel('Fréquence (Hz)')
+        plt.ylabel('Amplitude (dB)')
+        plt.grid()
+        plt.legend()
+        plt.subplot(2, 1, 2)
         plt.plot(freqs_filtre, amplitude_db(np.abs(spectre_filtre)), 'r', label='Signal filtré (dB)')
+        plt.title('Spectres du signal filtré')
         plt.xlabel('Fréquence (Hz)')
         plt.ylabel('Amplitude (dB)')
         plt.grid()
@@ -273,30 +272,78 @@ def plot_basson_filtre_vs_synthese():
     harmoniques_bass = harmoniques_top32(basson_filtre, basson_sample_rate, distance=200, plot=True)
     synth_basson = synthese(harmoniques_bass, basson_sample_rate, signal_enveloppe=basson_filtre, plot=True)    
 
-    spectre_filtre = np.fft.fft(basson_filtre * np.hanning(len(basson_filtre)))
-    freqs_filtre = np.fft.fftfreq(len(basson_filtre), 1 / basson_sample_rate)
-    spectre_synth_basson = np.fft.fft(synth_basson * np.hanning(len(synth_basson)))
-    freqs_synth_basson = np.fft.fftfreq(len(synth_basson), 1 / basson_sample_rate)
+    spectre_filtre = np.fft.rfft(basson_filtre * np.hanning(len(basson_filtre)))
+    freqs_filtre = np.fft.rfftfreq(len(basson_filtre), 1 / basson_sample_rate)
+    spectre_synth_basson = np.fft.rfft(synth_basson * np.hanning(len(synth_basson)))
+    freqs_synth_basson = np.fft.rfftfreq(len(synth_basson), 1 / basson_sample_rate)
     plt.figure()
     plt.subplot(2, 1, 1)
-    plt.plot(freqs_filtre, amplitude_db(spectre_filtre), label='Signal filtré (dB)')
+    plt.plot(freqs_filtre, amplitude_db(np.abs(spectre_filtre)), label='Signal filtré (dB)')
     plt.title('Spectre du signal filtré (dB)')
     plt.xlabel('Fréquence (Hz)')
     plt.ylabel('Amplitude (dB)')
     plt.legend()
     plt.subplot(2, 1, 2)
-    plt.plot(freqs_synth_basson, amplitude_db(spectre_synth_basson), 'r', label='Signal synthétisé (dB)')
+    plt.plot(freqs_synth_basson, amplitude_db(np.abs(spectre_synth_basson)), 'r', label='Signal synthétisé (dB)')
     plt.xlabel('Fréquence (Hz)')
     plt.ylabel('Amplitude (dB)')
     plt.title('Spectre du signal synthétisé (dB)')
     plt.legend()
     plt.grid()
 
+def plot_basson_original_vs_synthese():
+    
+    basson_filtre = filtre_basson(plot=True)    
+    harmoniques_bass = harmoniques_top32(basson_filtre, basson_sample_rate, distance=200, plot=True)
+    synth_basson = synthese(harmoniques_bass, basson_sample_rate, signal_enveloppe=basson_filtre, plot=True)
+    
+    basson_spectre = np.fft.rfft(basson_filtre * np.hanning(len(basson_filtre)))
+    basson_freqs = np.fft.rfftfreq(len(basson_filtre), 1 / basson_sample_rate)
+    
+    synth_basson_spectre = np.fft.rfft(synth_basson * np.hanning(len(synth_basson)))
+    synth_basson_freqs = np.fft.rfftfreq(len(synth_basson), 1 / basson_sample_rate)
+    
+    plt.figure()
+    plt.subplot(2, 1, 1)
+    plt.title('Spectre du signal original (dB)')
+    plt.plot(basson_freqs, amplitude_db(np.abs(basson_spectre)), label='Signal original (dB)')
+    plt.xlabel('Fréquence (Hz)')
+    plt.ylabel('Amplitude (dB)')
+    plt.legend()
+    plt.subplot(2, 1, 2)
+    plt.title('Spectre du signal synthétisé (dB)')
+    plt.plot(synth_basson_freqs, amplitude_db(np.abs(synth_basson_spectre)), 'r', label='Signal synthétisé (dB)')
+    plt.xlabel('Fréquence (Hz)')
+    plt.ylabel('Amplitude (dB)')
+    plt.legend()
+    
+def plot_guitare_original_vs_synthese():
+    harmoniques = harmoniques_top32(guit_signal, guit_sample_rate, plot=True)
+    synth_signal = synthese(harmoniques, guit_sample_rate, signal_enveloppe=guit_signal, plot=True)
+    
+    spectre_guit = np.fft.rfft(guit_signal * np.hanning(len(guit_signal)))
+    freqs_guit = np.fft.rfftfreq(len(guit_signal), 1 / guit_sample_rate)
+    spectre_synth = np.fft.rfft(synth_signal * np.hanning(len(synth_signal)))
+    freqs_synth = np.fft.rfftfreq(len(synth_signal), 1 / guit_sample_rate)
+    plt.figure()
+    plt.subplot(2, 1, 1)
+    plt.plot(freqs_guit, amplitude_db(np.abs(spectre_guit)), label='Signal original (dB)')
+    plt.title('Spectre du signal original (dB)')
+    plt.xlabel('Fréquence (Hz)')
+    plt.ylabel('Amplitude (dB)')
+    plt.legend()
+    plt.subplot(2, 1, 2)
+    plt.plot(freqs_synth, amplitude_db(np.abs(spectre_synth)), 'r', label='Signal synthétisé (dB)')
+    plt.xlabel('Fréquence (Hz)')
+    plt.ylabel('Amplitude (dB)')
+    plt.title('Spectre du signal synthétisé (dB)')
+    plt.legend()
+
 if __name__ == "__main__":
     plot = True
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     signal_to_wav(synthese(harmoniques_top32(guit_signal, guit_sample_rate, plot=plot), guit_sample_rate, plot=plot), filename=f"synthese/synthese_guitare_lad_{now}.wav")
-    signal_to_wav(synth_5ft_symphonie_bethoven(), filename=f"synthese/symphonie_bethoven_{now}.wav")
+    signal_to_wav(synth_5ft_symphonie_beethoven(), filename=f"synthese/symphonie_bethoven_{now}.wav")
 
     # Filtrage du basson
     signal_to_wav(normalise(filtre_basson(plot=False)), filename=f"synthese/basson_filtre_{now}.wav")
@@ -307,6 +354,7 @@ if __name__ == "__main__":
     synth_basson = synthese(harmoniques_bass, basson_sample_rate, signal_enveloppe=basson_filtre, plot=plot)    
     signal_to_wav(synth_basson, basson_sample_rate, filename=f"synthese/synthese_basson_lad_{now}.wav")
     
+    plot_guitare_original_vs_synthese()
+    plot_basson_original_vs_synthese()
     
     plt.show()
-    print("HERE")
